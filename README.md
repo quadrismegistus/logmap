@@ -83,40 +83,27 @@ def function_to_map(naptime):
 
 # open the logmap
 with logmap('testing function mapping') as lw:
-
     # get results as a list
     results = lw.map(function_to_map, objs, num_proc=2)
-
-# show results
-results
 ```
 
-    testing function mapping @ 2023-12-12 12:58:20,608
-    ￨ mapping function_to_map to 5 objects [2x]: 100%|██████████| 5/5 [00:00<00:00,  5.08it/s]
-    ⎿ 1 second @ 2023-12-12 12:58:21,608
+    testing function mapping @ 2023-12-12 13:00:31,037
+    ￨ mapping function_to_map to 5 objects [2x]: 100%|██████████| 5/5 [00:02<00:00,  2.09it/s]
+    ⎿ 2.4 seconds @ 2023-12-12 13:00:33,433
 
 
-
-
-
-    [0.0,
-     0.45455356308145395,
-     0.032980832312656805,
-     0.5999049813004816,
-     0.5094736472140351]
-
-
+Or get a generator for results as they arrive (in order):
 
 
 ```python
-# Or get a generator for results as they arrive (in order)
 with logmap('testing function mapping') as lw:
+    # this is a generator
     results_iter = lw.imap(function_to_map, objs, num_proc=2)
+    # loop as results arrive
     for res in results_iter:
+        # this will update progress bar
         lw.log(f'got result: {res:.02}')
 ```
 
-    testing function mapping @ 2023-12-12 12:58:21,620
-    ￨ got result: 1.1 [2x]: 100%|██████████| 5/5 [00:01<00:00,  2.91it/s]             
-    ⎿ 1.7 seconds @ 2023-12-12 12:58:23,345
-
+    testing function mapping @ 2023-12-12 13:01:23,981
+    ￨ got result: 1.1 [2x]:  80%|████████  | 4/5 [00:01<00:00,  2.23it/s]             
