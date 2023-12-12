@@ -4,7 +4,7 @@ import time
 from functools import cached_property
 from loguru import logger
 from humanfriendly import format_timespan
-import multiprocessing as mp
+import multiprocess as mp
 from collections import deque
 from tqdm import tqdm
 
