@@ -102,8 +102,10 @@ with logmap('testing function mapping') as lw:
     # loop as results arrive
     for res in results_iter:
         # this will update progress bar
-        lw.log(f'got result: {res:.02}')
+        lw.log(f'got result: {res:.02}') 
 ```
 
     testing function mapping @ 2023-12-12 13:01:23,981
-    ￨ got result: 1.1 [2x]:  80%|████████  | 4/5 [00:01<00:00,  2.23it/s]             
+    ￨ got result: 1.7 [2x]: 100%|██████████| 5/5 [00:02<00:00,  1.99it/s]             
+    ⎿ 2.5 seconds @ 2023-12-12 13:01:26,500
+
