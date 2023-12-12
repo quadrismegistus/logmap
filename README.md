@@ -33,8 +33,8 @@ with logmap('testing...'):
 
 ```python
 # get duration
-with logmap('testing...') as lw:
-    naptime = lw.nap()
+with logmap('testing...') as lm:
+    naptime = lm.nap()
 ```
 
     testing... @ 2023-12-12 12:58:19,874
@@ -44,17 +44,17 @@ with logmap('testing...') as lw:
 
 
 ```python
-assert naptime == lw.duration
+assert naptime == lm.duration
 ```
 
 ### Nested logging
 
 
 ```python
-with logmap('testing nested logging') as lw:
-    with logmap('opening nest level 2') as lw2:
-        with logmap('opening nest level 3') as lw3:
-            lw3.nap()
+with logmap('testing nested logging') as lm:
+    with logmap('opening nest level 2') as lm2:
+        with logmap('opening nest level 3') as lm3:
+            lm3.nap()
 ```
 
     testing nested logging @ 2023-12-12 12:58:20,292
@@ -82,9 +82,9 @@ def function_to_map(naptime):
     return naptime
 
 # open the logmap
-with logmap('testing function mapping') as lw:
+with logmap('testing function mapping') as lm:
     # get results as a list
-    results = lw.map(function_to_map, objs, num_proc=2)
+    results = lm.map(function_to_map, objs, num_proc=2)
 ```
 
     testing function mapping @ 2023-12-12 13:00:31,037
@@ -96,13 +96,13 @@ Or get a generator for results as they arrive (in order):
 
 
 ```python
-with logmap('testing function mapping') as lw:
+with logmap('testing function mapping') as lm:
     # this is a generator
-    results_iter = lw.imap(function_to_map, objs, num_proc=2)
+    results_iter = lm.imap(function_to_map, objs, num_proc=2)
     # loop as results arrive
     for res in results_iter:
         # this will update progress bar
-        lw.log(f'got result: {res:.02}') 
+        lm.log(f'got result: {res:.02}') 
 ```
 
     testing function mapping @ 2023-12-12 13:01:23,981
