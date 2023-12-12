@@ -24,8 +24,8 @@ with logmap('testing...'):
     pass
 ```
 
-    testing... @ 2023-12-12 11:41:41,203
-    ⎿ 0 seconds @ 2023-12-12 11:41:41,204
+    testing... @ 2023-12-12 12:55:14,035
+    ⎿ 0 seconds @ 2023-12-12 12:55:14,037
 
 
 ### Getting duration
@@ -35,14 +35,17 @@ with logmap('testing...'):
 # get duration
 with logmap('testing...') as lw:
     naptime = lw.nap()
-
-assert naptime == lw.duration
 ```
 
-    testing... @ 2023-12-12 11:41:45,288
-    ￨ napping for 0.7 seconds @ 2023-12-12 11:41:45,289
-    ⎿ 0.7 seconds @ 2023-12-12 11:41:45,990
+    testing... @ 2023-12-12 12:55:14,044
+    ￨ napping for 0.4 seconds @ 2023-12-12 12:55:14,045
+    ⎿ 0.4 seconds @ 2023-12-12 12:55:14,448
 
+
+
+```python
+assert naptime == lw.duration
+```
 
 ### Nested logging
 
@@ -54,13 +57,13 @@ with logmap('testing nested logging') as lw:
             lw3.nap()
 ```
 
-    testing nested logging @ 2023-12-12 11:43:35,657
-    ￨ opening nest level 2 @ 2023-12-12 11:43:35,658
-    ￨ ￨ opening nest level 3 @ 2023-12-12 11:43:35,659
-    ￨ ￨ ￨ napping for 0.3 seconds @ 2023-12-12 11:43:35,660
-    ￨ ￨ ⎿ 0.3 seconds @ 2023-12-12 11:43:35,963
-    ￨ ⎿ 0.3 seconds @ 2023-12-12 11:43:35,964
-    ⎿ 0.3 seconds @ 2023-12-12 11:43:35,964
+    testing nested logging @ 2023-12-12 12:55:14,478
+    ￨ opening nest level 2 @ 2023-12-12 12:55:14,479
+    ￨ ￨ opening nest level 3 @ 2023-12-12 12:55:14,480
+    ￨ ￨ ￨ napping for 0.6 seconds @ 2023-12-12 12:55:14,480
+    ￨ ￨ ⎿ 0.6 seconds @ 2023-12-12 12:55:15,085
+    ￨ ⎿ 0.6 seconds @ 2023-12-12 12:55:15,086
+    ⎿ 0.6 seconds @ 2023-12-12 12:55:15,087
 
 
 ### Mapping
@@ -70,7 +73,7 @@ with logmap('testing nested logging') as lw:
 import random,time
 
 # get objs to map
-objs = list(range(10))
+objs = list(range(5))
 
 # define function to map
 def function_to_map(naptime):
@@ -81,17 +84,39 @@ def function_to_map(naptime):
 # open the logmap
 with logmap('testing function mapping') as lw:
 
-    # get results in list...
+    # get results as a list
     results = lw.map(function_to_map, objs, num_proc=2)
 
-    # ...or get a generator for results as they arrive (in order)
+# show results
+results
+```
+
+    testing function mapping @ 2023-12-12 12:55:15,094
+    ￨ mapping function_to_map to 5 objects [2x]: 100%|██████████| 5/5 [00:01<00:00,  2.77it/s]
+    ⎿ 1.8 seconds @ 2023-12-12 12:55:16,912
+
+
+
+
+
+    [0.0,
+     0.37160430145215606,
+     0.8314377929884459,
+     0.4700268826859305,
+     0.9458661115488189]
+
+
+
+
+```python
+# Or get a generator for results as they arrive (in order)
+with logmap('testing function mapping') as lw:
     results_iter = lw.imap(function_to_map, objs, num_proc=2)
     for res in results_iter:
         lw.log(f'got result: {res:.02}')
 ```
 
-    testing function mapping @ 2023-12-12 12:45:23,074
-    ￨ mapping function_to_map to 10 objects [2x]: 100%|██████████| 10/10 [00:09<00:00,  1.06it/s]
-    ￨ got result: 4.0 [2x]: 100%|██████████| 10/10 [00:07<00:00,  1.37it/s]             
-    ⎿ 16.8 seconds @ 2023-12-12 12:45:39,858
+    testing function mapping @ 2023-12-12 12:55:16,925
+    ￨ got result: 1.1 [2x]: 100%|██████████| 5/5 [00:01<00:00,  3.17it/s]             
+    ⎿ 1.6 seconds @ 2023-12-12 12:55:18,508
 
