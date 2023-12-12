@@ -50,7 +50,7 @@ class logmap:
             if self.num_proc and self.num_proc>1: msg=f'{msg} [{self.num_proc}x]'
             self.set_progress_desc(msg)
 
-    def iter_progress(self, iterator, desc='iterating', pref=None, position=0, total=None, **kwargs):
+    def iter_progress(self, iterator, desc='iterating', pref=None, position=0, total=None, progress=True, **kwargs):
         # first arg is for percentage
         # 2nd one is for the bar
         # 3rd one is for the end of the line 
@@ -58,7 +58,7 @@ class logmap:
                 self.level2color[self.level], COLORS['light-cyan'], COLORS['light-cyan']
             )
         desc=f'{self.inner_pref if pref is None else pref}{desc if desc is not None else "iterating"}'
-        self.pbar = tqdm(iterator,desc=desc,position=position,total=total,bar_format=read_bar_format,**kwargs)
+        self.pbar = tqdm(iterator,desc=desc,position=position,total=total,bar_format=read_bar_format,disable=not progress,**kwargs)
         yield from self.pbar
         self.pbar.close()
         self.pbar = None
@@ -74,6 +74,7 @@ class logmap:
             desc=None,
             shuffle=None,
             context=CONTEXT,
+            progress=True,
             **pmap_kwargs):
         if desc is None: desc=f'mapping {func.__name__} to {len(objs)} objects'
         if num_proc>1: desc=f'{desc} [{num_proc}x]'
@@ -94,7 +95,8 @@ class logmap:
         yield from self.iter_progress(
             iterr,
             desc=desc,
-            total=len(objs)
+            total=len(objs),
+            progress=progress
         )
 
     def map(self, *args, **kwargs):
