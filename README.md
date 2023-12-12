@@ -24,8 +24,8 @@ with logmap('testing...'):
     pass
 ```
 
-    testing... @ 2023-12-12 12:55:14,035
-    ⎿ 0 seconds @ 2023-12-12 12:55:14,037
+    testing... @ 2023-12-12 12:56:00,732
+    ⎿ 0 seconds @ 2023-12-12 12:56:00,733
 
 
 ### Getting duration
@@ -37,15 +37,22 @@ with logmap('testing...') as lw:
     naptime = lw.nap()
 ```
 
-    testing... @ 2023-12-12 12:55:14,044
-    ￨ napping for 0.4 seconds @ 2023-12-12 12:55:14,045
-    ⎿ 0.4 seconds @ 2023-12-12 12:55:14,448
+    testing... @ 2023-12-12 12:56:00,739
+    ￨ napping for 1.0 seconds @ 2023-12-12 12:56:00,740
+    ⎿ 1 second @ 2023-12-12 12:56:01,745
 
 
 
 ```python
-assert naptime == lw.duration
+naptime == lw.duration
 ```
+
+
+
+
+    True
+
+
 
 ### Nested logging
 
@@ -57,13 +64,13 @@ with logmap('testing nested logging') as lw:
             lw3.nap()
 ```
 
-    testing nested logging @ 2023-12-12 12:55:14,478
-    ￨ opening nest level 2 @ 2023-12-12 12:55:14,479
-    ￨ ￨ opening nest level 3 @ 2023-12-12 12:55:14,480
-    ￨ ￨ ￨ napping for 0.6 seconds @ 2023-12-12 12:55:14,480
-    ￨ ￨ ⎿ 0.6 seconds @ 2023-12-12 12:55:15,085
-    ￨ ⎿ 0.6 seconds @ 2023-12-12 12:55:15,086
-    ⎿ 0.6 seconds @ 2023-12-12 12:55:15,087
+    testing nested logging @ 2023-12-12 12:56:01,761
+    ￨ opening nest level 2 @ 2023-12-12 12:56:01,762
+    ￨ ￨ opening nest level 3 @ 2023-12-12 12:56:01,763
+    ￨ ￨ ￨ napping for 0.5 seconds @ 2023-12-12 12:56:01,764
+    ￨ ￨ ⎿ 0.5 seconds @ 2023-12-12 12:56:02,268
+    ￨ ⎿ 0.5 seconds @ 2023-12-12 12:56:02,269
+    ⎿ 0.5 seconds @ 2023-12-12 12:56:02,270
 
 
 ### Mapping
@@ -91,19 +98,19 @@ with logmap('testing function mapping') as lw:
 results
 ```
 
-    testing function mapping @ 2023-12-12 12:55:15,094
-    ￨ mapping function_to_map to 5 objects [2x]: 100%|██████████| 5/5 [00:01<00:00,  2.77it/s]
-    ⎿ 1.8 seconds @ 2023-12-12 12:55:16,912
+    testing function mapping @ 2023-12-12 12:56:02,279
+    ￨ mapping function_to_map to 5 objects [2x]: 100%|██████████| 5/5 [00:01<00:00,  3.20it/s]
+    ⎿ 1.6 seconds @ 2023-12-12 12:56:03,855
 
 
 
 
 
     [0.0,
-     0.37160430145215606,
-     0.8314377929884459,
-     0.4700268826859305,
-     0.9458661115488189]
+     0.38940430406309995,
+     0.42620823441628486,
+     1.1463515363207601,
+     0.8378910357390124]
 
 
 
@@ -116,7 +123,7 @@ with logmap('testing function mapping') as lw:
         lw.log(f'got result: {res:.02}')
 ```
 
-    testing function mapping @ 2023-12-12 12:55:16,925
-    ￨ got result: 1.1 [2x]: 100%|██████████| 5/5 [00:01<00:00,  3.17it/s]             
-    ⎿ 1.6 seconds @ 2023-12-12 12:55:18,508
+    testing function mapping @ 2023-12-12 12:56:03,866
+    ￨ got result: 0.23 [2x]: 100%|██████████| 5/5 [00:01<00:00,  4.46it/s]            
+    ⎿ 1.1 seconds @ 2023-12-12 12:56:04,993
 
