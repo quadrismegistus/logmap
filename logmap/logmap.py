@@ -41,13 +41,14 @@ class logmap:
         self.num_proc=None
         self.precision = precision
 
-    def log(self, msg, pref=None, inner_pref=True,level=None):
+    def log(self, msg, pref=None, inner_pref=True,level=None, linelim=None):
         if not msg: return
+        msg = padmin(msg,linelim) if linelim else msg
         if self.pbar is None:
             logfunc = getattr(logger,(self.level if not level else level).lower())
             logfunc(f'{(self.inner_pref if inner_pref else self.pref) if pref is None else pref}{msg}')
         else:
-            if self.num_proc and self.num_proc>1: msg=f'{msg} [{self.num_proc}x]'
+            # if self.num_proc and self.num_proc>1: msg=f'{msg} [{self.num_proc}x]'
             self.set_progress_desc(msg)
 
     def iter_progress(self, iterator, desc='iterating', pref=None, position=0, total=None, progress=True, **kwargs):
@@ -212,3 +213,15 @@ class logmap:
                 self.log(self.desc, inner_pref=False)
             if NUM_LOGWATCHES==0: LOGWATCH_ID=0
 
+
+
+
+
+
+def padmin(xstr,lim=40):
+    xstr=str(xstr)
+    if len(xstr)<lim:
+        xstr = xstr + (' '*(lim - len(xstr)))
+    else:
+        xstr = xstr[:lim]
+    return xstr
