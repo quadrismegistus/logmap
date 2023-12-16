@@ -7,6 +7,7 @@ from humanfriendly import format_timespan
 import multiprocess as mp
 from collections import deque
 from tqdm import tqdm
+from contextlib import contextmanager
 
 LOG_FORMAT = '<level>{message}</level><cyan> @ {time:YYYY-MM-DD HH:mm:ss,SSS}</cyan>'
 NUM_LOGWATCHES=0

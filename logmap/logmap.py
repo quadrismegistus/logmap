@@ -1,5 +1,6 @@
 from .imports import *
 
+
 COLORS = {
     "default": "\033[0;39m",
     "light-blue": "\033[0;34m",
@@ -20,7 +21,23 @@ class logmap:
         task_name (str): The name of the task being monitored.
     """
 
-    quiet = False
+    is_quiet = False
+
+    @staticmethod
+    @contextmanager
+    def quiet():
+        was_quiet = logmap.is_quiet
+        logmap.is_quiet = True
+        yield
+        logmap.is_quiet = was_quiet
+
+    @staticmethod
+    @contextmanager
+    def loud():
+        was_quiet = logmap.is_quiet
+        logmap.is_quiet = False
+        yield
+        logmap.is_quiet = was_quiet
 
     def __init__(
         self,
@@ -50,7 +67,7 @@ class logmap:
         self.precision = precision
 
     def log(self, msg, pref=None, inner_pref=True, level=None, linelim=None):
-        if self.quiet or not msg:
+        if self.is_quiet or not msg:
             return
         msg = padmin(msg, linelim) if linelim else msg
         if self.pbar is None:
@@ -87,7 +104,7 @@ class logmap:
             position=position,
             total=total,
             bar_format=read_bar_format,
-            disable=not progress,
+            disable=not progress or self.is_quiet,
             **kwargs,
         )
         yield from self.pbar
