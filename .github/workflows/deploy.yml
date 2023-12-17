@@ -38,10 +38,11 @@ jobs:
           - name: Install dependencies
             run: |
               pip install -U pip wheeel
-              pip install -r requirements.txt
+              pip install -e .
+              pip install build
     
           - name: Build a binary wheel and a source tarball
-            run: python3 -m build
+            run: python -m build
           - name: Store the distribution packages
             uses: actions/upload-artifact@v3
             with:
