@@ -11,24 +11,42 @@ jobs:
         runs-on: ubuntu-latest
     
         steps:
-        - uses: actions/checkout@v4
-        - name: Set up Python
-          uses: actions/setup-python@v4
-          with:
-            python-version: "3.12"
-        - name: Install pypa/build
-          run: >-
-            python3 -m
-            pip install
-            build
-            --user
-        - name: Build a binary wheel and a source tarball
-          run: python3 -m build
-        - name: Store the distribution packages
-          uses: actions/upload-artifact@v3
-          with:
-            name: python-package-distributions
-            path: dist/
+          - name: Checkout repository
+            uses: actions/checkout@v3
+    
+          # NOTE: Python version to use is stored in the .python-version file, which is the
+          # convention for pyenv: https://github.com/pyenv/pyenv
+          - name: Get Python version
+            run: echo "PYTHON_VERSION=$(cat .python-version)" >> $GITHUB_ENV
+    
+          # use python version for current build
+          - name: Setup Python
+            uses: actions/setup-python@v3
+            with:
+              python-version: ${{ env.PYTHON_VERSION }}
+    
+          - name: Cache pip
+            uses: actions/cache@v3
+            with:
+              path: ~/.cache/pip
+              key: pip-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt') }}
+              restore-keys: |
+                pip-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt') }}
+                pip-${{ env.PYTHON_VERSION }}
+                pip-
+    
+          - name: Install dependencies
+            run: |
+              pip install -U pip wheeel
+              pip install -r requirements.txt
+    
+          - name: Build a binary wheel and a source tarball
+            run: python3 -m build
+          - name: Store the distribution packages
+            uses: actions/upload-artifact@v3
+            with:
+              name: python-package-distributions
+              path: dist/
     
     publish-to-pypi:
         name: >-
