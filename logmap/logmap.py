@@ -1,6 +1,5 @@
 from .imports import *
 
-
 COLORS = {
     "default": "\033[0;39m",
     "light-blue": "\033[0;34m",
@@ -39,22 +38,43 @@ class logmap:
         yield
         logmap.is_quiet = was_quiet
 
-    def __init__(
-        self,
-        name="running task",
-        level="DEBUG",
-        min_seconds_logworthy=None,
-        precision=1,
-    ):
+    disabled = quiet
+    enabled = loud
+
+    @staticmethod
+    def enable():
+        logmap.is_quiet = False
+
+    @staticmethod
+    def disable():
+        logmap.is_quiet = True
+
+    @staticmethod
+    @contextmanager
+    def verbosity(level=1):
+        was_quiet = logmap.is_quiet
+        logmap.is_quiet = not level
+        yield
+        logmap.is_quiet = was_quiet
+
+    def __init__(self,
+                 name="running task",
+                 level="DEBUG",
+                 min_seconds_logworthy=None,
+                 precision=1,
+                 announce=True):
         global LOGWATCH_ID
         LOGWATCH_ID += 1
         self.id = LOGWATCH_ID
         self.started = None
         self.ended = None
+        self.announce = announce
         self.level = level.upper()
         self.task_name = name
         self.min_seconds_logworthy = min_seconds_logworthy
         self.vertical_char = "￨"
+        self.top_char = "⎾"
+        self.bottom_char = "⎿"
         self.last_lap = None
         self.level2color = {
             "TRACE": "\033[0;36m",
@@ -65,19 +85,36 @@ class logmap:
         self.pbar = None
         self.num_proc = None
         self.precision = precision
+        self.iterated_num = False
 
     def log(self, msg, pref=None, inner_pref=True, level=None, linelim=None):
         if self.is_quiet or not msg:
             return
         msg = padmin(msg, linelim) if linelim else msg
         if self.pbar is None:
-            logfunc = getattr(logger, (self.level if not level else level).lower())
+            logfunc = getattr(logger,
+                              (self.level if not level else level).lower())
             logfunc(
                 f"{(self.inner_pref if inner_pref else self.pref) if pref is None else pref}{msg}"
             )
         else:
             # if self.num_proc and self.num_proc>1: msg=f'{msg} [{self.num_proc}x]'
             self.set_progress_desc(msg)
+
+    def warning(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, 'level': 'warning'})
+
+    def trace(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, 'level': 'trace'})
+
+    def error(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, 'level': 'error'})
+
+    def info(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, 'level': 'info'})
+
+    def debug(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, 'level': 'debug'})
 
     def iter_progress(
         self,
@@ -118,7 +155,7 @@ class logmap:
         args=[],
         kwargs={},
         lim=None,
-        num_proc=1,
+        num_proc=None,
         desc=None,
         shuffle=None,
         context=CONTEXT,
@@ -127,6 +164,13 @@ class logmap:
     ):
         if desc is None:
             desc = f"mapping {func.__name__} to {len(objs)} objects"
+
+        if num_proc is None:
+            num_proc = mp.cpu_count() // 2
+        if num_proc < 1:
+            num_proc = 1
+        if num_proc > mp.cpu_count():
+            num_proc = mp.cpu_count()
         if num_proc > 1:
             desc = f"{desc} [{num_proc}x]"
         self.num_proc = num_proc
@@ -143,9 +187,10 @@ class logmap:
             progress=False,
             **pmap_kwargs,
         )
-        yield from self.iter_progress(
-            iterr, desc=desc, total=len(objs), progress=progress
-        )
+        yield from self.iter_progress(iterr,
+                                      desc=desc,
+                                      total=len(objs),
+                                      progress=progress)
 
     def map(self, *args, **kwargs):
         return list(self.imap(*args, **kwargs))
@@ -197,8 +242,8 @@ class logmap:
             float: The duration of the event in seconds.
         """
         return round(
-            (self.ended if self.ended else time.time()) - self.started, self.precision
-        )
+            (self.ended if self.ended else time.time()) - self.started,
+            self.precision)
 
     @cached_property
     def pref(self):
@@ -222,9 +267,9 @@ class logmap:
             str: A description of the task.
         """
         if self.started is None or self.ended is None:
-            return f"{self.task_name}".strip()
+            return f"{self.top_char} {self.task_name}".strip()
         else:
-            return f"⎿ {self.tdesc}".strip()
+            return f"{self.bottom_char} {self.tdesc}".strip()
 
     def __enter__(self):
         """Context manager method that is called when entering a 'with' statement.
@@ -236,10 +281,13 @@ class logmap:
                 # code to be executed within the context manager
         """
         global NUM_LOGWATCHES
-        NUM_LOGWATCHES += 1
-        self.num = NUM_LOGWATCHES
-        self.log(self.desc, inner_pref=False)
         self.started = self.last_lap = time.time()
+        if self.announce or not NUM_LOGWATCHES:
+            NUM_LOGWATCHES += 1
+            self.iterated_num = True
+        self.num = NUM_LOGWATCHES
+        if self.announce:
+            self.log(self.desc, inner_pref=False)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -254,14 +302,12 @@ class logmap:
             # logger.error(f'{exc_type.__name__} {exc_value}')
             self.log(f"{exc_type.__name__} {exc_value}", level="error")
         else:
-            NUM_LOGWATCHES -= 1
+            if self.iterated_num: NUM_LOGWATCHES -= 1
             self.ended = time.time()
-            if (
-                not self.min_seconds_logworthy
-                or self.duration >= self.min_seconds_logworthy
-            ):
+            if (not self.min_seconds_logworthy
+                    or self.duration >= self.min_seconds_logworthy):
                 # if self.tdesc!='0 seconds':
-                self.log(self.desc, inner_pref=False)
+                if self.announce: self.log(self.desc, inner_pref=False)
             if NUM_LOGWATCHES == 0:
                 LOGWATCH_ID = 0
 
