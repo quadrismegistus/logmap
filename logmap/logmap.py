@@ -124,6 +124,7 @@ class logmap:
         position=0,
         total=None,
         progress=True,
+        shuffle=False,
         **kwargs,
     ):
         # first arg is for percentage
@@ -136,7 +137,7 @@ class logmap:
         )
         desc = f'{self.inner_pref if pref is None else pref}{desc if desc is not None else "iterating"}'
         self.pbar = tqdm(
-            iterator,
+            shuffled(iterator) if shuffle else iterator,
             desc=desc,
             position=position,
             total=total,
@@ -271,6 +272,10 @@ class logmap:
         else:
             return f"{self.bottom_char} {self.tdesc}".strip()
 
+    def __call__(self, *x, **y):
+        return self.iter_progress(*x, **y)
+
+
     def __enter__(self):
         """Context manager method that is called when entering a 'with' statement.
 
@@ -311,6 +316,22 @@ class logmap:
             if NUM_LOGWATCHES == 0:
                 LOGWATCH_ID = 0
 
+    @contextmanager
+    def safespace(
+            self, 
+            exception=Exception, 
+            log=True, 
+            msg=None, 
+            level='error'):
+        try:
+            yield
+        except exception as e:
+            if log: self.log(str(msg) if msg else str(e), level=level)
+    
+    @property
+    def safety(self):
+        return self.safespace()
+
 
 def padmin(xstr, lim=40):
     xstr = str(xstr)
@@ -319,3 +340,6 @@ def padmin(xstr, lim=40):
     else:
         xstr = xstr[:lim]
     return xstr
+
+def shuffled(l):
+    return random.sample(list(l),k=len(l))
