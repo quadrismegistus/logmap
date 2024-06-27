@@ -1,120 +1,78 @@
-from .imports import *
+import sys
+import random
+import time
+from functools import wraps
+import multiprocessing as mp
+from collections import deque
+from tqdm import tqdm
+from contextlib import contextmanager
+from loguru import logger
 
-COLORS = {
-    "default": "\033[0;39m",
-    "light-blue": "\033[0;34m",
-    "light-cyan": "\033[0;36m",
-    "light-yellow": "\033[0;33m",
-    "light-magenta": "\033[0;35m",
-}
+# Configure loguru
+logger.remove()
+logger.add(
+    sink=sys.stderr,
+    format="<level>{message}</level><cyan> @ {time:YYYY-MM-DD HH:mm:ss,SSS}</cyan>",
+    level="DEBUG",
+)
 
 
-class logmap:
-    """A class for monitoring and logging the duration of tasks.
-
-    Attributes:
-        started (float): The timestamp when the task started.
-        ended (float): The timestamp when the task ended.
-        level (str): The logging level for the task. Default is 'DEBUG'.
-        log (Logger): The logger object for logging the task status.
-        task_name (str): The name of the task being monitored.
-    """
-
-    is_quiet = False
-
-    @staticmethod
-    @contextmanager
-    def quiet():
-        was_quiet = logmap.is_quiet
-        logmap.is_quiet = True
-        yield
-        logmap.is_quiet = was_quiet
-
-    @staticmethod
-    @contextmanager
-    def loud():
-        was_quiet = logmap.is_quiet
-        logmap.is_quiet = False
-        yield
-        logmap.is_quiet = was_quiet
-
-    disabled = quiet
-    enabled = loud
-
-    @staticmethod
-    def enable():
-        logmap.is_quiet = False
-
-    @staticmethod
-    def disable():
-        logmap.is_quiet = True
-
-    @staticmethod
-    @contextmanager
-    def verbosity(level=1):
-        was_quiet = logmap.is_quiet
-        logmap.is_quiet = not level
-        yield
-        logmap.is_quiet = was_quiet
-
-    def __init__(self,
-                 name="running task",
-                 level="DEBUG",
-                 min_seconds_logworthy=None,
-                 precision=1,
-                 announce=True):
-        global LOGWATCH_ID
-        LOGWATCH_ID += 1
-        self.id = LOGWATCH_ID
-        self.started = None
-        self.ended = None
-        self.announce = announce
-        self.level = level.upper()
-        self.task_name = name
-        self.min_seconds_logworthy = min_seconds_logworthy
+class LogMap:
+    def __init__(self):
+        self.level = 0
+        self.is_quiet = False
+        self.start_times = []
         self.vertical_char = "￨"
         self.top_char = "⎾"
         self.bottom_char = "⎿"
-        self.last_lap = None
-        self.level2color = {
-            "TRACE": "\033[0;36m",
-            "DEBUG": "\033[1;34m",
-            "WARNING": "\033[1;33m",
-            "ERROR": "\033[1;31m",
-        }
+        self._iterator = None
+        self._iter_kwargs = {}
         self.pbar = None
-        self.num_proc = None
-        self.precision = precision
-        self.iterated_num = False
 
-    def log(self, msg, pref=None, inner_pref=True, level=None, linelim=None):
-        if self.is_quiet or not msg:
-            return
-        msg = padmin(msg, linelim) if linelim else msg
-        if self.pbar is None:
-            logfunc = getattr(logger,
-                              (self.level if not level else level).lower())
-            logfunc(
-                f"{(self.inner_pref if inner_pref else self.pref) if pref is None else pref}{msg}"
-            )
+    def __call__(self, arg=None, **kwargs):
+        if arg is None:
+            return self
+        elif isinstance(arg, str):
+            return self._context_manager(arg, **kwargs)
         else:
-            # if self.num_proc and self.num_proc>1: msg=f'{msg} [{self.num_proc}x]'
-            self.set_progress_desc(msg)
+            self._iterator = arg
+            self._iter_kwargs = kwargs
+            return self
 
-    def warning(self, *args, **kwargs):
-        return self.log(*args, **{**kwargs, 'level': 'warning'})
+    @contextmanager
+    def _context_manager(
+        self, message, increment_level=True, level="DEBUG", announce=True, **kwargs
+    ):
+        if announce:
+            self.log(f"{self.top_char} {message}", level=level)
+        start_time = time.time()
+        self.start_times.append(start_time)
 
-    def trace(self, *args, **kwargs):
-        return self.log(*args, **{**kwargs, 'level': 'trace'})
+        if increment_level:
+            self.level += 1
 
-    def error(self, *args, **kwargs):
-        return self.log(*args, **{**kwargs, 'level': 'error'})
+        try:
+            yield self
+        finally:
+            if increment_level:
+                self.level -= 1
 
-    def info(self, *args, **kwargs):
-        return self.log(*args, **{**kwargs, 'level': 'info'})
+            duration = time.time() - self.start_times.pop()
+            if announce:
+                self.log(f"{self.bottom_char} ✔️ {duration:.2f} seconds", level=level)
 
-    def debug(self, *args, **kwargs):
-        return self.log(*args, **{**kwargs, 'level': 'debug'})
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+
+    def __iter__(self):
+        if self._iterator is None:
+            raise ValueError(
+                "No iterator set. Use logmap(iterator) before attempting to iterate."
+            )
+        return self.iter_progress(self._iterator, **self._iter_kwargs)
 
     def iter_progress(
         self,
@@ -127,17 +85,15 @@ class logmap:
         shuffle=False,
         **kwargs,
     ):
-        # first arg is for percentage
-        # 2nd one is for the bar
-        # 3rd one is for the end of the line
-        read_bar_format = "%s{l_bar}%s{bar}%s{r_bar}" % (
-            self.level2color[self.level],
-            COLORS["light-cyan"],
-            COLORS["light-cyan"],
-        )
+        read_bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
         desc = f'{self.inner_pref if pref is None else pref}{desc if desc is not None else "iterating"}'
+
+        if shuffle:
+            iterator = list(iterator)
+            random.shuffle(iterator)
+
         self.pbar = tqdm(
-            shuffled(iterator) if shuffle else iterator,
+            iterator,
             desc=desc,
             position=position,
             total=total,
@@ -145,9 +101,31 @@ class logmap:
             disable=not progress or self.is_quiet,
             **kwargs,
         )
-        yield from self.pbar
-        self.pbar.close()
-        self.pbar = None
+
+        try:
+            yield from self.pbar
+        finally:
+            self.pbar.close()
+            self.pbar = None
+
+    loop = iter_progress
+
+    def log(self, message, level="DEBUG"):
+        if not self.is_quiet:
+            indent = f"{self.vertical_char} " * self.level
+            if self.pbar is None:
+                logger.log(level.upper(), f"{indent}{message}")
+            else:
+                self.pbar.set_description(f"{indent}{message}")
+
+    @contextmanager
+    def quiet(self):
+        prev_quiet = self.is_quiet
+        self.is_quiet = True
+        try:
+            yield
+        finally:
+            self.is_quiet = prev_quiet
 
     def imap(
         self,
@@ -157,189 +135,85 @@ class logmap:
         kwargs={},
         lim=None,
         num_proc=None,
-        desc=None,
-        shuffle=None,
-        context=CONTEXT,
+        use_threads=False,
         progress=True,
-        **pmap_kwargs,
+        progress_pos=0,
+        desc=None,
+        shuffle=False,
+        context="fork",
     ):
-        if desc is None:
-            desc = f"mapping {func.__name__} to {len(objs)} objects"
+        if shuffle:
+            random.shuffle(objs)
+        if lim:
+            objs = objs[:lim]
 
+        num_cpu = mp.cpu_count()
         if num_proc is None:
-            num_proc = mp.cpu_count() // 2
-        if num_proc < 1:
-            num_proc = 1
-        if num_proc > mp.cpu_count():
-            num_proc = mp.cpu_count()
-        if num_proc > 1:
+            num_proc = max(1, num_cpu - 2)
+        num_proc = min(num_proc, num_cpu, len(objs))
+
+        if not desc:
+            desc = f"Mapping {func.__name__}()"
+        if desc and num_cpu > 1:
             desc = f"{desc} [{num_proc}x]"
-        self.num_proc = num_proc
-        iterr = pmap_iter(
-            func,
-            objs,
-            args=args,
-            kwargs=kwargs,
-            lim=lim,
-            num_proc=num_proc,
-            desc=None,
-            shuffle=shuffle,
-            context=context,
-            progress=False,
-            **pmap_kwargs,
-        )
-        yield from self.iter_progress(iterr,
-                                      desc=desc,
-                                      total=len(objs),
-                                      progress=progress)
+
+        if num_proc > 1 and len(objs) > 1:
+            objects = [(func, obj, args, kwargs) for obj in objs]
+
+            pool_cls = (
+                mp.pool.ThreadPool if use_threads else mp.get_context(context).Pool
+            )
+            with pool_cls(num_proc) as pool:
+                iterr = pool.imap(self._map_do, objects)
+
+                yield from self.iter_progress(
+                    iterr,
+                    total=len(objects),
+                    desc=desc,
+                    position=progress_pos,
+                    progress=progress,
+                )
+        else:
+            yield from self.iter_progress(
+                objs, desc=desc, position=progress_pos, progress=progress
+            )
+
+    @staticmethod
+    def _map_do(inp):
+        func, obj, args, kwargs = inp
+        return func(obj, *args, **kwargs)
 
     def map(self, *args, **kwargs):
         return list(self.imap(*args, **kwargs))
 
-    def run(self, *args, **kwargs):
+    def map_run(self, *args, **kwargs):
         deque(self.imap(*args, **kwargs), maxlen=0)
 
-    def nap(self):
-        naptime = round(random.random(), self.precision)
-        self.log(f"napping for {naptime} seconds")
-        time.sleep(naptime)
-        return naptime
-
-    def set_progress_desc(self, desc, pref=None, **kwargs):
-        if desc:
-            desc = f'{self.inner_pref if pref is None else pref}{desc if desc is not None else ""}'
-            self.pbar.set_description(desc, **kwargs)
+    def nap(self, max_duration=1):
+        duration = random.uniform(0, max_duration)
+        time.sleep(duration)
+        self.log(f"Napped for {duration:.2f} seconds")
+        return duration
 
     @property
-    def tdesc(self):
-        """Returns the formatted timespan of the duration.
-
-        Returns:
-            str: The formatted timespan of the duration.
-
-        Examples:
-            >>> t = tdesc(self)
-            >>> print(t)
-            '2 hours 30 minutes'
-        """
-        return format_timespan(self.duration)
-
-    def lap(self):
-        self.last_lap = time.time()
-
-    @property
-    def lap_duration(self):
-        return time.time() - self.last_lap if self.last_lap else 0
-
-    @property
-    def lap_tdesc(self):
-        return format_timespan(self.lap_duration)
-
-    @property
-    def duration(self):
-        """Calculates the duration of an event.
-
-        Returns:
-            float: The duration of the event in seconds.
-        """
-        return round(
-            (self.ended if self.ended else time.time()) - self.started,
-            self.precision)
-
-    @cached_property
-    def pref(self):
-        return f"{self.vertical_char} " * (self.num - 1)
-
-    @cached_property
     def inner_pref(self):
-        return f"{self.vertical_char} " * (self.num)
+        return f"{self.vertical_char} " * (self.level)
 
-    @property
-    def desc(self):
-        """Returns a description of the task.
+    def warning(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, "level": "warning"})
 
-        If the task has both a start time and an end time, it returns a string
-        indicating the task name and the time it took to complete the task.
+    def trace(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, "level": "trace"})
 
-        If the task is currently running, it returns a string indicating that
-        the task is still running.
+    def error(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, "level": "error"})
 
-        Returns:
-            str: A description of the task.
-        """
-        if self.started is None or self.ended is None:
-            return f"{self.top_char} {self.task_name}".strip()
-        else:
-            return f"{self.bottom_char} {self.tdesc}".strip()
+    def info(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, "level": "info"})
 
-    def __call__(self, *x, **y):
-        return self.iter_progress(*x, **y)
+    def debug(self, *args, **kwargs):
+        return self.log(*args, **{**kwargs, "level": "debug"})
 
 
-    def __enter__(self):
-        """Context manager method that is called when entering a 'with' statement.
-
-        This method logs the description of the context manager and starts the timer.
-
-        Examples:
-            with Logwatch():
-                # code to be executed within the context manager
-        """
-        global NUM_LOGWATCHES
-        self.started = self.last_lap = time.time()
-        if self.announce or not NUM_LOGWATCHES:
-            NUM_LOGWATCHES += 1
-            self.iterated_num = True
-        self.num = NUM_LOGWATCHES
-        if self.announce:
-            self.log(self.desc, inner_pref=False)
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        """
-        Logs the resulting time.
-        """
-        global NUM_LOGWATCHES, LOGWATCH_ID
-
-        if exc_type:
-            LOGWATCH_ID = 0
-            NUM_LOGWATCHES = 0
-            # logger.error(f'{exc_type.__name__} {exc_value}')
-            self.log(f"{exc_type.__name__} {exc_value}", level="error")
-        else:
-            if self.iterated_num: NUM_LOGWATCHES -= 1
-            self.ended = time.time()
-            if (not self.min_seconds_logworthy
-                    or self.duration >= self.min_seconds_logworthy):
-                # if self.tdesc!='0 seconds':
-                if self.announce: self.log(self.desc, inner_pref=False)
-            if NUM_LOGWATCHES == 0:
-                LOGWATCH_ID = 0
-
-    @contextmanager
-    def safespace(
-            self, 
-            exception=Exception, 
-            log=True, 
-            msg=None, 
-            level='error'):
-        try:
-            yield
-        except exception as e:
-            if log: self.log(str(msg) if msg else str(e), level=level)
-    
-    @property
-    def safety(self):
-        return self.safespace()
-
-
-def padmin(xstr, lim=40):
-    xstr = str(xstr)
-    if len(xstr) < lim:
-        xstr = xstr + (" " * (lim - len(xstr)))
-    else:
-        xstr = xstr[:lim]
-    return xstr
-
-def shuffled(l):
-    return random.sample(list(l),k=len(l))
+# Create a single instance of LogMap
+logmap = LogMap()
