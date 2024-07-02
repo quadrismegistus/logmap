@@ -7,6 +7,9 @@ from collections import deque
 from tqdm import tqdm
 from contextlib import contextmanager
 from loguru import logger
+from collections.abc import Iterable
+
+def is_iterable(x): return isinstance(x, Iterable)
 
 # Configure loguru
 logger.remove()
@@ -29,21 +32,32 @@ class LogMap:
         self._iter_kwargs = {}
         self.pbar = None
 
-    def __call__(self, arg="?", **kwargs):
+    def __call__(self, arg=None, *args, **kwargs):
         if arg is None:
             return self
         elif isinstance(arg, str):
-            return self._context_manager(arg, **kwargs)
-        else:
-            # self._iterator = arg
-            # self._iter_kwargs = kwargs
-            return self.iter_progress(arg, **kwargs)
+            if self._is_context_manager():
+                return self._context_manager(arg,*args,**kwargs)
+            else:
+                self.log(arg, *args, **kwargs)
+                return self
+        elif is_iterable(arg):
+            return self.iter_progress(arg,*args,**kwargs)
+
+    def _is_context_manager(self):
+        import inspect
+        stack = inspect.stack()
+        for frame_info in stack[1:]:
+            if 'with' in frame_info.code_context[0]:
+                return True
+        return False
 
     @contextmanager
     def _context_manager(
-        self, message, increment_level=True, level="DEBUG", announce=True, **kwargs
-    ):
+        self, *messages, increment_level=True, level="DEBUG", announce=True, end=' ', **kwargs
+    ): 
         if announce:
+            message = end.join(str(x) for x in messages)
             self.log(f"{self.top_char} {message}", level=level)
         start_time = time.time()
         self.start_times.append(start_time)
@@ -60,12 +74,6 @@ class LogMap:
             duration = time.time() - self.start_times.pop()
             if announce:
                 self.log(f"{self.bottom_char} ✔️ {duration:.2f} seconds", level=level)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        pass
 
     def __iter__(self):
         if self._iterator is None:
