@@ -29,15 +29,15 @@ class LogMap:
         self._iter_kwargs = {}
         self.pbar = None
 
-    def __call__(self, arg=None, **kwargs):
+    def __call__(self, arg="?", **kwargs):
         if arg is None:
             return self
         elif isinstance(arg, str):
             return self._context_manager(arg, **kwargs)
         else:
-            self._iterator = arg
-            self._iter_kwargs = kwargs
-            return self
+            # self._iterator = arg
+            # self._iter_kwargs = kwargs
+            return self.iter_progress(arg, **kwargs)
 
     @contextmanager
     def _context_manager(
@@ -105,12 +105,14 @@ class LogMap:
         try:
             yield from self.pbar
         finally:
-            self.pbar.close()
-            self.pbar = None
+            if self.pbar is not None:
+                self.pbar.close()
+                self.pbar = None
 
     loop = iter_progress
 
-    def log(self, message, level="DEBUG"):
+    def log(self, *messages, level="DEBUG", end=' '):
+        message = end.join(str(x) for x in messages)
         if not self.is_quiet:
             indent = f"{self.vertical_char} " * self.level
             if self.pbar is None:
