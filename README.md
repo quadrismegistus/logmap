@@ -1,111 +1,142 @@
 # logmap
 
-A hierarchical, context-manager logger utility with multiprocess mapping capabilities
+A hierarchical context-manager logger with multiprocess mapping.
 
 ## Install
 
-```
-!pip install git+https://github.com/quadrismegistus/logmap
+```sh
+pip install logmap
 ```
 
 ## Usage
-
 
 ```python
 from logmap import logmap
 ```
 
-### Basic usage
-
+### Basic
 
 ```python
 with logmap('testing...'):
     # ... do something ...
     pass
 ```
+```
+⎾ testing... @ 2026-04-19 15:12:55,349
+⎿ 0 seconds @ 2026-04-19 15:12:55,349
+```
 
-    testing... @ 2023-12-12 12:58:19,866
-    ⎿ 0 seconds @ 2023-12-12 12:58:19,867
-
-
-### Getting duration
-
+### Duration
 
 ```python
-# get duration
 with logmap('testing...') as lm:
     naptime = lm.nap()
-```
 
-    testing... @ 2023-12-12 12:58:19,874
-    ￨ napping for 0.4 seconds @ 2023-12-12 12:58:19,875
-    ⎿ 0.4 seconds @ 2023-12-12 12:58:20,280
-
-
-
-```python
 assert naptime == lm.duration
 ```
+```
+⎾ testing... @ 2026-04-19 15:12:55,349
+￨ napping for 0.6 seconds @ 2026-04-19 15:12:55,349
+⎿ 0.6 seconds @ 2026-04-19 15:12:55,954
+```
 
-### Nested logging
+### Nested
 
+Nesting indents automatically. `lm.log("msg")` writes at the current depth.
 
 ```python
-with logmap('testing nested logging') as lm:
-    with logmap('opening nest level 2') as lm2:
-        with logmap('opening nest level 3') as lm3:
+with logmap('outer') as lm:
+    with logmap('middle') as lm2:
+        with logmap('inner') as lm3:
             lm3.nap()
 ```
-
-    testing nested logging @ 2023-12-12 12:58:20,292
-    ￨ opening nest level 2 @ 2023-12-12 12:58:20,293
-    ￨ ￨ opening nest level 3 @ 2023-12-12 12:58:20,294
-    ￨ ￨ ￨ napping for 0.3 seconds @ 2023-12-12 12:58:20,294
-    ￨ ￨ ⎿ 0.3 seconds @ 2023-12-12 12:58:20,599
-    ￨ ⎿ 0.3 seconds @ 2023-12-12 12:58:20,600
-    ⎿ 0.3 seconds @ 2023-12-12 12:58:20,601
-
-
-### Mapping
-
-
-```python
-import random,time
-
-# get objs to map
-objs = list(range(5))
-
-# define function to map
-def function_to_map(naptime):
-    naptime = random.random() * naptime / 2
-    time.sleep(naptime)
-    return naptime
-
-# open the logmap
-with logmap('testing function mapping') as lm:
-    # get results as a list
-    results = lm.map(function_to_map, objs, num_proc=2)
+```
+⎾ outer @ 2026-04-19 15:12:55,954
+￨ ⎾ middle @ 2026-04-19 15:12:55,954
+￨ ￨ ⎾ inner @ 2026-04-19 15:12:55,954
+￨ ￨ ￨ napping for 0.2 seconds @ 2026-04-19 15:12:55,954
+￨ ￨ ⎿ 0.2 seconds @ 2026-04-19 15:12:56,159
+￨ ⎿ 0.2 seconds @ 2026-04-19 15:12:56,159
+⎿ 0.2 seconds @ 2026-04-19 15:12:56,159
 ```
 
-    testing function mapping @ 2023-12-12 13:00:31,037
-    ￨ mapping function_to_map to 5 objects [2x]: 100%|██████████| 5/5 [00:02<00:00,  2.09it/s]
-    ⎿ 2.4 seconds @ 2023-12-12 13:00:33,433
-
-
-Or get a generator for results as they arrive (in order):
-
+### Parallel map
 
 ```python
-with logmap('testing function mapping') as lm:
-    # this is a generator
-    results_iter = lm.imap(function_to_map, objs, num_proc=2)
-    # loop as results arrive
-    for res in results_iter:
-        # this will update progress bar
-        lm.log(f'got result: {res:.02}') 
+import random, time
+
+def fn(naptime):
+    t = random.random() * naptime / 2
+    time.sleep(t)
+    return t
+
+with logmap('function mapping') as lm:
+    results = lm.map(fn, list(range(5)), num_proc=2)
+```
+```
+⎾ function mapping @ 2026-04-19 15:12:56,159
+￨ mapping fn to 5 objects [2x]: 100%|██████████| 5/5 [00:02<00:00, 2.31it/s]
+⎿ 2.2 seconds @ 2026-04-19 15:12:58,335
 ```
 
-    testing function mapping @ 2023-12-12 13:01:23,981
-    ￨ got result: 1.7 [2x]: 100%|██████████| 5/5 [00:02<00:00,  1.99it/s]             
-    ⎿ 2.5 seconds @ 2023-12-12 13:01:26,500
+For streaming results as they arrive:
 
+```python
+with logmap('function mapping') as lm:
+    for res in lm.imap(fn, list(range(5)), num_proc=2):
+        lm.log(f'got {res:.2f}')   # updates the progress bar
+```
+
+`lm.run(...)` is the same but discards results — useful when you only care about side effects.
+
+Module-level helpers `pmap`, `pmap_iter`, `pmap_run` provide the same semantics without a `logmap` context:
+
+```python
+from logmap import pmap
+pmap(fn, items, num_proc=4)
+```
+
+> **Note:** `logmap` uses stdlib `multiprocessing`, so functions passed to parallel map must be picklable (defined at module level — no lambdas or closures).
+
+### Without a `with` block
+
+```python
+# just a logger
+lm = logmap('app')
+lm.log('ready')
+lm.warning('careful')
+
+# explicit lifecycle (equivalent to a `with` block)
+lm = logmap('manual').start()
+lm.log('doing stuff')
+lm.stop()
+```
+
+### Redirecting output
+
+`logmap` writes to `sys.stderr` by default. Use `configure()` to redirect:
+
+```python
+from logmap import configure
+import sys
+
+configure(sink=sys.stdout)          # e.g. so it doesn't mingle with stderr diagnostics
+configure(sink="run.log")           # path — opened line-buffered
+configure(sink=my_stringio)         # any writable stream
+configure(level="INFO")             # drop DEBUG messages
+```
+
+Colors auto-disable when the sink isn't a TTY (files, StringIO, etc.).
+
+### Silencing
+
+```python
+with logmap.quiet():
+    with logmap('no output'):       # nothing gets printed
+        ...
+
+logmap.disable()                    # global off switch
+logmap.enable()                     # back on
+```
+
+`with logmap('task', announce=False):` suppresses just the open/close lines while keeping `lm.log()` active.
