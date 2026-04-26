@@ -98,6 +98,67 @@ pmap(fn, items, num_proc=4)
 
 > **Note:** `logmap` uses stdlib `multiprocessing`, so functions passed to parallel map must be picklable (defined at module level — no lambdas or closures).
 
+### Progress bar
+
+`lm.progress(iterable)` wraps any iterable with a progress bar at the current nesting depth:
+
+```python
+with logmap('training') as lm:
+    for batch in lm.progress(batches, desc='epochs'):
+        train(batch)
+```
+
+### Async support
+
+`logmap` works as an async context manager:
+
+```python
+async with logmap('fetching') as lm:
+    result = await fetch(url)
+    lm.log(f'got {len(result)} bytes')
+```
+
+### Function decorator
+
+`@logmap.fn` wraps a function in a `logmap` context — logging the call, timing it, and optionally logging the return value:
+
+```python
+@logmap.fn
+def process(x):
+    return x * 2
+
+process(21)
+```
+```
+⎾ process(21) @ 2026-04-26 12:00:00,000
+￨ >>> 42 @ 2026-04-26 12:00:00,001
+⎿ 0 seconds @ 2026-04-26 12:00:00,001
+```
+
+With options:
+
+```python
+@logmap.fn(level="INFO", log_return=False)
+def transform(data):
+    return data
+
+@logmap.fn(log_args=False)          # hide arguments (e.g. passwords)
+def authenticate(token):
+    return True
+```
+
+Works with async functions too:
+
+```python
+@logmap.fn
+async def fetch(url):
+    async with aiohttp.ClientSession() as session:
+        resp = await session.get(url)
+        return await resp.text()
+```
+
+Decorated functions nest naturally with `logmap` contexts and other decorated functions.
+
 ### Without a `with` block
 
 ```python

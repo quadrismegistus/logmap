@@ -1,3 +1,5 @@
+import asyncio
+import inspect
 import io
 import json
 import logging
@@ -15,6 +17,16 @@ from logmap import configure, logmap, pmap, pmap_iter, pmap_run
 # Module-level functions so they're picklable by multiprocess workers.
 def _square(x):
     return x * x
+
+
+@logmap.fn
+def _decorated_square(x):
+    return x * x
+
+
+@logmap.fn(level="INFO", log_return=False)
+def _decorated_no_return(x):
+    return x + 1
 
 
 def _add(x, y):
@@ -591,3 +603,167 @@ class TestStructuredOutput:
         output = captured_sink.getvalue()
         with pytest.raises(json.JSONDecodeError):
             json.loads(output.splitlines()[0])
+
+
+class TestFnDecorator:
+    def test_bare_decorator_returns_correct_result(self):
+        assert _decorated_square(5) == 25
+
+    def test_bare_decorator_logs_call_and_return(self, captured_sink):
+        _decorated_square(7)
+        output = captured_sink.getvalue()
+        assert "_decorated_square(7)" in output
+        assert ">>> 49" in output
+
+    def test_parameterized_decorator_returns_correct_result(self):
+        assert _decorated_no_return(3) == 4
+
+    def test_log_return_false_suppresses_return_value(self, captured_sink):
+        _decorated_no_return(3)
+        output = captured_sink.getvalue()
+        assert "_decorated_no_return(3)" in output
+        assert ">>>" not in output
+
+    def test_preserves_function_metadata(self):
+        assert _decorated_square.__name__ == "_decorated_square"
+
+    def test_nests_with_logmap_context(self, captured_sink):
+        with logmap("outer") as lm:
+            _decorated_square(2)
+        output = captured_sink.getvalue()
+        assert "outer" in output
+        assert "_decorated_square(2)" in output
+
+    def test_logs_kwargs(self, captured_sink):
+        @logmap.fn
+        def greet(name, greeting="hello"):
+            return f"{greeting} {name}"
+
+        greet("world", greeting="hi")
+        output = captured_sink.getvalue()
+        assert "greet(" in output
+        assert "world" in output
+        assert "greeting=" in output
+
+    def test_skips_self_arg_for_methods(self, captured_sink):
+        class Foo:
+            @logmap.fn
+            def bar(self, x):
+                return x
+
+        Foo().bar(42)
+        output = captured_sink.getvalue()
+        assert "Foo.bar(42)" in output
+
+    def test_none_return_not_logged(self, captured_sink):
+        @logmap.fn
+        def returns_none():
+            pass
+
+        returns_none()
+        output = captured_sink.getvalue()
+        assert ">>>" not in output
+
+    def test_exception_propagates(self):
+        @logmap.fn
+        def explode():
+            raise ValueError("boom")
+
+        with pytest.raises(ValueError, match="boom"):
+            explode()
+
+    def test_log_args_false(self, captured_sink):
+        @logmap.fn(log_args=False)
+        def secret(password):
+            return True
+
+        secret("hunter2")
+        output = captured_sink.getvalue()
+        assert "secret()" in output
+        assert "hunter2" not in output
+
+
+class TestProgress:
+    def test_progress_iterates_all_items(self, captured_sink):
+        with logmap("task") as lm:
+            items = list(lm.progress([1, 2, 3], progress=False))
+        assert items == [1, 2, 3]
+
+    def test_progress_with_desc(self, captured_sink):
+        with logmap("task") as lm:
+            list(lm.progress(range(3), desc="processing", progress=False))
+        # progress=False disables tqdm, so no desc in output — just verify no crash
+        # With progress=True, tqdm writes desc to stderr directly (not our sink)
+
+
+class TestAsyncContextManager:
+    def test_async_with_basic(self, captured_sink):
+        async def run():
+            async with logmap("async-task") as lm:
+                lm.log("inside async")
+                return lm
+
+        lm = asyncio.run(run())
+        assert lm.started is not None
+        assert lm.ended is not None
+        output = captured_sink.getvalue()
+        assert "async-task" in output
+        assert "inside async" in output
+
+    def test_async_nesting(self, captured_sink):
+        async def run():
+            async with logmap("outer") as lm1:
+                async with logmap("inner") as lm2:
+                    return lm1.num, lm2.num
+
+        n1, n2 = asyncio.run(run())
+        assert n2 == n1 + 1
+
+    def test_async_exception_handling(self, captured_sink):
+        async def run():
+            with pytest.raises(ValueError):
+                async with logmap("will-fail"):
+                    raise ValueError("async boom")
+
+        asyncio.run(run())
+        assert "ValueError" in captured_sink.getvalue()
+
+
+class TestAsyncFnDecorator:
+    def test_async_fn_decorator(self, captured_sink):
+        @logmap.fn
+        async def fetch(url):
+            return f"data from {url}"
+
+        result = asyncio.run(fetch("example.com"))
+        assert result == "data from example.com"
+        output = captured_sink.getvalue()
+        assert "fetch(" in output
+        assert ">>> " in output
+
+    def test_async_fn_preserves_metadata(self):
+        @logmap.fn
+        async def my_coro(x):
+            return x
+
+        assert my_coro.__name__ == "my_coro"
+        assert inspect.iscoroutinefunction(my_coro)
+
+    def test_async_fn_with_options(self, captured_sink):
+        @logmap.fn(level="INFO", log_return=False)
+        async def process(data):
+            return data * 2
+
+        result = asyncio.run(process(21))
+        assert result == 42
+        output = captured_sink.getvalue()
+        assert "process(21)" in output
+        assert ">>>" not in output
+
+    def test_async_fn_exception_propagates(self):
+        @logmap.fn
+        async def explode():
+            raise RuntimeError("async boom")
+
+        with pytest.raises(RuntimeError, match="async boom"):
+            asyncio.run(explode())

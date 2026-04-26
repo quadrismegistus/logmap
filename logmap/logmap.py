@@ -1,5 +1,8 @@
 """Hierarchical context-manager logger with multiprocess mapping."""
 
+import asyncio
+import functools
+import inspect
 import json
 import multiprocessing as mp
 import platform
@@ -279,6 +282,28 @@ def shuffled(l):
     return random.sample(list(l), k=len(l))
 
 
+def _short_repr(obj, maxlen=80):
+    r = repr(obj).replace("\n", " ")
+    return r[:maxlen - 3] + "..." if len(r) > maxlen else r
+
+
+def _format_call(func, args, kwargs, maxlen=60):
+    name = func.__qualname__
+    fn_args = list(args)
+    try:
+        code = func.__code__
+        if code.co_varnames and code.co_varnames[0] in ("self", "cls"):
+            fn_args = fn_args[1:]
+    except AttributeError:
+        pass
+    parts = [_short_repr(a, 20) for a in fn_args]
+    parts.extend(f"{k}={_short_repr(v, 20)}" for k, v in kwargs.items())
+    params = ", ".join(parts)
+    if len(params) > maxlen:
+        params = params[:maxlen - 3] + "..."
+    return f"{name}({params})"
+
+
 # ---------------------------------------------------------------------------
 # The logmap class
 # ---------------------------------------------------------------------------
@@ -347,6 +372,44 @@ class logmap(metaclass=_LogmapMeta):
             yield
         finally:
             _nesting.is_quiet = was_quiet
+
+    # -- function decorator ---------------------------------------------------
+
+    @staticmethod
+    def fn(_func=None, *, level="DEBUG", log_args=True, log_return=True):
+        """Decorator that wraps a function call in a logmap context.
+
+        Works with both sync and async functions::
+
+            @logmap.fn
+            def process(x): ...
+
+            @logmap.fn(level="INFO")
+            async def fetch(url): ...
+        """
+        def decorator(func):
+            if inspect.iscoroutinefunction(func):
+                @functools.wraps(func)
+                async def wrapper(*args, **kwargs):
+                    desc = _format_call(func, args, kwargs) if log_args else func.__qualname__ + "()"
+                    async with logmap(desc, level=level) as lm:
+                        result = await func(*args, **kwargs)
+                        if log_return and result is not None:
+                            lm.log(f">>> {_short_repr(result)}")
+                        return result
+                return wrapper
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                desc = _format_call(func, args, kwargs) if log_args else func.__qualname__ + "()"
+                with logmap(desc, level=level) as lm:
+                    result = func(*args, **kwargs)
+                    if log_return and result is not None:
+                        lm.log(f">>> {_short_repr(result)}")
+                    return result
+            return wrapper
+        if _func is not None:
+            return decorator(_func)
+        return decorator
 
     # -- init -----------------------------------------------------------------
 
@@ -448,6 +511,17 @@ class logmap(metaclass=_LogmapMeta):
         yield from self.pbar
         self.pbar.close()
         self.pbar = None
+
+    def progress(self, iterable, desc="iterating", **kwargs):
+        """Iterate with a progress bar at the current nesting depth.
+
+        Alias for :meth:`iter_progress` with a shorter name::
+
+            with logmap("training") as lm:
+                for batch in lm.progress(batches, desc="epochs"):
+                    ...
+        """
+        return self.iter_progress(iterable, desc=desc, **kwargs)
 
     def imap(
         self,
@@ -603,6 +677,12 @@ class logmap(metaclass=_LogmapMeta):
         return self.start()
 
     def __exit__(self, exc_type, exc_value, traceback):
+        self.stop(exc_type, exc_value, traceback)
+
+    async def __aenter__(self):
+        return self.start()
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
         self.stop(exc_type, exc_value, traceback)
 
     # -- safe execution -------------------------------------------------------
