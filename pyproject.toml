@@ -1,3 +1,42 @@
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "logmap"
+version = "0.3.0"
+description = "A hierarchical, context-manager logger utility with multiprocess mapping capabilities"
+readme = "README.md"
+license = "GPL-3.0-only"
+requires-python = ">=3.9"
+authors = [{ name = "Ryan Heuser", email = "rj416@cam.ac.uk" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "humanfriendly",
+    "tqdm",
+]
+
+[project.urls]
+Homepage = "https://github.com/quadrismegistus/logmap"
+"Bug Tracker" = "https://github.com/quadrismegistus/logmap/issues"
+
+[project.optional-dependencies]
+dev = ["build", "twine", "wheel"]
+test = ["pytest>=7.2"]
+all = ["logmap[dev]", "logmap[test]"]
+
+[tool.setuptools.packages.find]
+exclude = ["tests", "tests.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

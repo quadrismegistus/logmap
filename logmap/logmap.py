@@ -1,8 +1,11 @@
 """Hierarchical context-manager logger with multiprocess mapping."""
 
+import json
 import multiprocessing as mp
+import platform
 import random
 import sys
+import threading
 import time
 from collections import deque
 from contextlib import contextmanager
@@ -16,15 +19,21 @@ from tqdm.auto import tqdm
 # Module config
 # ---------------------------------------------------------------------------
 
-CONTEXT = "fork"
+def _default_mp_context():
+    system = platform.system()
+    if system == "Darwin":
+        return "forkserver"
+    if system == "Windows":
+        return "spawn"
+    return "fork"
+
+
+CONTEXT = _default_mp_context()
 
 _cpu = mp.cpu_count()
 DEFAULT_NUM_PROC = 1 if _cpu <= 1 else (2 if _cpu <= 3 else _cpu - 2)
 
-NUM_LOGWATCHES = 0
-LOGWATCH_ID = 0
-
-# Level dispatch — int values follow stdlib logging / loguru convention
+# Level dispatch — int values follow stdlib logging convention
 LEVELS = {
     "TRACE": 5,
     "DEBUG": 10,
@@ -58,12 +67,29 @@ COLORS = {
     "light-magenta": "\033[0;35m",
 }
 
-# Mutable module state (managed by configure())
+
+# ---------------------------------------------------------------------------
+# Thread-local nesting state + shared output config
+# ---------------------------------------------------------------------------
+
+class _NestingState(threading.local):
+    def __init__(self):
+        self.num_logwatches = 0
+        self.logwatch_id = 0
+        self.is_quiet = False
+
+
+_nesting = _NestingState()
+_lock = threading.Lock()
+
+# Output config — module-level, shared across threads, guarded by _lock
 _sink = sys.stderr
 _min_level = LEVELS["DEBUG"]
 _format = DEFAULT_FORMAT
 _opened_file = None
-_colorize = False  # cached isatty() for _sink; refreshed by configure()
+_colorize = False
+_logger = None
+_structured = False
 
 
 def _refresh_colorize():
@@ -76,26 +102,43 @@ def _refresh_colorize():
 
 _refresh_colorize()
 
+_UNSET = object()
 
-def _emit(msg, level="DEBUG"):
+
+def _emit(msg, level="DEBUG", extra=None):
     """Write one formatted log line to the current sink."""
     level = level.upper()
-    if LEVELS.get(level, 0) < _min_level:
+    lvl_int = LEVELS.get(level, 0)
+    if lvl_int < _min_level:
         return
     n = datetime.now()
-    ts = (f"{n.year:04d}-{n.month:02d}-{n.day:02d} "
-          f"{n.hour:02d}:{n.minute:02d}:{n.second:02d},{n.microsecond // 1000:03d}")
-    if _colorize:
-        line = _format.format(
-            color=LEVEL_COLORS.get(level, ""),
-            msg=msg, reset=_RESET, cyan=_CYAN, time=ts,
-        )
+
+    if _logger is not None:
+        clean = extra.get("msg", msg) if extra else msg
+        _logger.log(lvl_int, clean)
+        return
+
+    if _structured:
+        record = {"ts": n.isoformat(), "level": level, "msg": msg}
+        if extra:
+            record.update(extra)
+        line = json.dumps(record, default=str)
     else:
-        line = _format.format(color="", msg=msg, reset="", cyan="", time=ts)
-    _sink.write(line + "\n")
+        ts = (f"{n.year:04d}-{n.month:02d}-{n.day:02d} "
+              f"{n.hour:02d}:{n.minute:02d}:{n.second:02d},{n.microsecond // 1000:03d}")
+        if _colorize:
+            line = _format.format(
+                color=LEVEL_COLORS.get(level, ""),
+                msg=msg, reset=_RESET, cyan=_CYAN, time=ts,
+            )
+        else:
+            line = _format.format(color="", msg=msg, reset="", cyan="", time=ts)
+
+    with _lock:
+        _sink.write(line + "\n")
 
 
-def configure(sink=None, level=None, format=None):
+def configure(sink=None, level=None, format=None, logger=_UNSET, structured=None):
     """Reconfigure where logmap writes output.
 
     Omitted args keep their current value.
@@ -107,25 +150,36 @@ def configure(sink=None, level=None, format=None):
             threshold are suppressed.
         format: format string with ``{color}``, ``{msg}``, ``{reset}``,
             ``{cyan}``, ``{time}`` placeholders. See :data:`DEFAULT_FORMAT`.
+        logger: a :class:`logging.Logger`; when set, output is forwarded via
+            ``logger.log()`` instead of writing to the sink directly.
+            Pass ``None`` to clear.
+        structured: if ``True``, emit JSON-lines output instead of
+            human-readable text.  Each line is a JSON object with ``ts``,
+            ``level``, ``msg``, ``depth``, and ``task`` keys.
     """
-    global _sink, _min_level, _format, _opened_file
-    if sink is not None:
-        if _opened_file is not None:
-            try:
-                _opened_file.close()
-            except Exception:
-                pass
-            _opened_file = None
-        if isinstance(sink, str):
-            _opened_file = open(sink, "a", encoding="utf-8", buffering=1)
-            _sink = _opened_file
-        else:
-            _sink = sink
-        _refresh_colorize()
-    if level is not None:
-        _min_level = LEVELS[level.upper()] if isinstance(level, str) else int(level)
-    if format is not None:
-        _format = format
+    global _sink, _min_level, _format, _opened_file, _colorize, _logger, _structured
+    with _lock:
+        if sink is not None:
+            if _opened_file is not None:
+                try:
+                    _opened_file.close()
+                except Exception:
+                    pass
+                _opened_file = None
+            if isinstance(sink, str):
+                _opened_file = open(sink, "a", encoding="utf-8", buffering=1)
+                _sink = _opened_file
+            else:
+                _sink = sink
+            _refresh_colorize()
+        if level is not None:
+            _min_level = LEVELS[level.upper()] if isinstance(level, str) else int(level)
+        if format is not None:
+            _format = format
+        if logger is not _UNSET:
+            _logger = logger
+        if structured is not None:
+            _structured = bool(structured)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +194,6 @@ def _pmap_do(inp):
 def _auto_chunksize(n_items, num_proc):
     if num_proc <= 1 or n_items <= 0:
         return 1
-    # aim for ~4 chunks per worker so progress updates stay smooth
     return max(1, n_items // (num_proc * 4))
 
 
@@ -161,7 +214,7 @@ def pmap_iter(
 ):
     """Yield func(obj) for each obj in objs, optionally in parallel.
 
-    Does not mutate the caller's input. Uses ``multiprocess.Pool(num_proc)``
+    Does not mutate the caller's input. Uses ``multiprocessing.Pool(num_proc)``
     when ``num_proc > 1`` and there is more than one item.
     """
     kwargs = dict(kwargs) if kwargs else {}
@@ -230,7 +283,17 @@ def shuffled(l):
 # The logmap class
 # ---------------------------------------------------------------------------
 
-class logmap:
+class _LogmapMeta(type):
+    @property
+    def is_quiet(cls):
+        return _nesting.is_quiet
+
+    @is_quiet.setter
+    def is_quiet(cls, value):
+        _nesting.is_quiet = value
+
+
+class logmap(metaclass=_LogmapMeta):
     """Monitor and log the duration of a task, with hierarchical indentation.
 
     Typical use is as a context manager::
@@ -242,50 +305,48 @@ class logmap:
     :meth:`start` / :meth:`stop` calls.
     """
 
-    is_quiet = False
-
     # -- global enable/disable ------------------------------------------------
 
     @staticmethod
     @contextmanager
     def quiet():
-        was_quiet = logmap.is_quiet
-        logmap.is_quiet = True
+        was_quiet = _nesting.is_quiet
+        _nesting.is_quiet = True
         try:
             yield
         finally:
-            logmap.is_quiet = was_quiet
+            _nesting.is_quiet = was_quiet
 
     @staticmethod
     @contextmanager
     def loud():
-        was_quiet = logmap.is_quiet
-        logmap.is_quiet = False
+        was_quiet = _nesting.is_quiet
+        _nesting.is_quiet = False
         try:
             yield
         finally:
-            logmap.is_quiet = was_quiet
+            _nesting.is_quiet = was_quiet
 
     disabled = quiet
     enabled = loud
 
     @staticmethod
     def enable():
-        logmap.is_quiet = False
+        _nesting.is_quiet = False
 
     @staticmethod
     def disable():
-        logmap.is_quiet = True
+        _nesting.is_quiet = True
 
     @staticmethod
     @contextmanager
     def verbosity(level=1):
-        was_quiet = logmap.is_quiet
-        logmap.is_quiet = not level
+        was_quiet = _nesting.is_quiet
+        _nesting.is_quiet = not level
         try:
             yield
         finally:
-            logmap.is_quiet = was_quiet
+            _nesting.is_quiet = was_quiet
 
     # -- init -----------------------------------------------------------------
 
@@ -297,9 +358,8 @@ class logmap:
         precision=1,
         announce=True,
     ):
-        global LOGWATCH_ID
-        LOGWATCH_ID += 1
-        self.id = LOGWATCH_ID
+        _nesting.logwatch_id += 1
+        self.id = _nesting.logwatch_id
         self.started = None
         self.ended = None
         self.announce = announce
@@ -314,18 +374,31 @@ class logmap:
         self.num_proc = None
         self.precision = precision
         self.iterated_num = False
-        # default depth so log()/pref work before start()/__enter__ is called
         self.num = 0
+
+    # -- is_quiet (instance-level, delegates to thread-local) -----------------
+
+    @property
+    def is_quiet(self):
+        return _nesting.is_quiet
+
+    @is_quiet.setter
+    def is_quiet(self, value):
+        _nesting.is_quiet = value
 
     # -- log ------------------------------------------------------------------
 
     def log(self, msg, pref=None, inner_pref=True, level=None, linelim=None):
-        if self.is_quiet or not msg:
+        if _nesting.is_quiet or not msg:
             return
         msg = padmin(msg, linelim) if linelim else msg
         if self.pbar is None:
             prefix = (self.inner_pref if inner_pref else self.pref) if pref is None else pref
-            _emit(f"{prefix}{msg}", level=level or self.level)
+            _emit(
+                f"{prefix}{msg}",
+                level=level or self.level,
+                extra={"depth": self.num, "task": self.task_name, "msg": msg},
+            )
         else:
             self.set_progress_desc(msg)
 
@@ -369,7 +442,7 @@ class logmap:
             position=position,
             total=total,
             bar_format=bar_format,
-            disable=not progress or self.is_quiet,
+            disable=not progress or _nesting.is_quiet,
             **kwargs,
         )
         yield from self.pbar
@@ -483,21 +556,21 @@ class logmap:
     def start(self):
         """Start timing and print the opening line.
 
-        Equivalent to entering a ``with`` block. Returns ``self`` so you can chain::
+        Equivalent to entering a ``with`` block. Returns ``self`` so you can
+        chain::
 
             lm = logmap("task").start()
             lm.log("doing stuff")
             lm.stop()
         """
-        global NUM_LOGWATCHES
         if self.started is not None and self.ended is None:
-            return self  # already running; idempotent
+            return self
         self.started = self.last_lap = time.time()
         self.ended = None
-        if self.announce or not NUM_LOGWATCHES:
-            NUM_LOGWATCHES += 1
+        if self.announce or not _nesting.num_logwatches:
+            _nesting.num_logwatches += 1
             self.iterated_num = True
-        self.num = NUM_LOGWATCHES
+        self.num = _nesting.num_logwatches
         if self.announce:
             self.log(self.desc, inner_pref=False)
         return self
@@ -508,24 +581,23 @@ class logmap:
         Equivalent to exiting a ``with`` block. Safe to call more than once;
         after the first call subsequent calls are no-ops.
         """
-        global NUM_LOGWATCHES, LOGWATCH_ID
         if self.started is None or self.ended is not None:
             return
         if exc_type:
-            LOGWATCH_ID = 0
-            NUM_LOGWATCHES = 0
+            _nesting.logwatch_id = 0
+            _nesting.num_logwatches = 0
             self.ended = time.time()
             self.log(f"{exc_type.__name__} {exc_value}", level="error")
         else:
             if self.iterated_num:
-                NUM_LOGWATCHES -= 1
+                _nesting.num_logwatches -= 1
             self.ended = time.time()
             if (not self.min_seconds_logworthy
                     or self.duration >= self.min_seconds_logworthy):
                 if self.announce:
                     self.log(self.desc, inner_pref=False)
-            if NUM_LOGWATCHES == 0:
-                LOGWATCH_ID = 0
+            if _nesting.num_logwatches == 0:
+                _nesting.logwatch_id = 0
 
     def __enter__(self):
         return self.start()

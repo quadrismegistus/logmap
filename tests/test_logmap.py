@@ -1,5 +1,10 @@
 import io
+import json
+import logging
+import logging.handlers
+import platform
 import sys
+import threading
 import time
 
 import pytest
@@ -273,3 +278,316 @@ class TestStandaloneUsage:
         lm = logmap("never-started")
         lm.stop()  # should not raise
         assert lm.ended is None
+
+
+class TestThreadSafety:
+    def test_nesting_depth_is_per_thread(self, captured_sink):
+        """Two threads running logmap contexts should each get depth 1."""
+        depths = {}
+        barrier = threading.Barrier(2)
+
+        def worker(name):
+            with logmap(name) as lm:
+                barrier.wait(timeout=5)
+                depths[name] = lm.num
+
+        t1 = threading.Thread(target=worker, args=("thread-a",))
+        t2 = threading.Thread(target=worker, args=("thread-b",))
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+        assert depths["thread-a"] == 1
+        assert depths["thread-b"] == 1
+
+    def test_quiet_is_per_thread(self):
+        """quiet() in one thread should not silence another thread."""
+        results = {}
+        barrier = threading.Barrier(2)
+
+        def quiet_thread():
+            with logmap.quiet():
+                barrier.wait(timeout=5)
+                results["quiet"] = logmap.is_quiet
+
+        def loud_thread():
+            barrier.wait(timeout=5)
+            results["loud"] = logmap.is_quiet
+
+        t1 = threading.Thread(target=quiet_thread)
+        t2 = threading.Thread(target=loud_thread)
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+        assert results["quiet"] is True
+        assert results["loud"] is False
+
+
+class TestMpContext:
+    def test_macos_does_not_use_fork(self):
+        from logmap.logmap import CONTEXT
+        if platform.system() == "Darwin":
+            assert CONTEXT != "fork"
+
+    def test_explicit_context_override(self):
+        with logmap("m") as lm:
+            out = lm.map(_square, [2, 3], num_proc=1, context="spawn", progress=False)
+        assert out == [4, 9]
+
+
+class TestStdlibLogging:
+    def test_configure_logger_receives_messages(self, captured_sink):
+        logger = logging.getLogger("logmap.test")
+        logger.setLevel(logging.DEBUG)
+        handler = logging.handlers.MemoryHandler(capacity=100)
+        logger.addHandler(handler)
+        try:
+            configure(logger=logger)
+            with logmap("stdlib") as lm:
+                lm.info("hello from logmap")
+            handler.flush()
+            messages = [r.getMessage() for r in handler.buffer]
+            assert any("hello from logmap" in m for m in messages)
+        finally:
+            configure(logger=None)
+            logger.removeHandler(handler)
+
+    def test_configure_logger_respects_level(self, captured_sink):
+        logger = logging.getLogger("logmap.test.level")
+        logger.setLevel(logging.DEBUG)
+        handler = logging.handlers.MemoryHandler(capacity=100)
+        logger.addHandler(handler)
+        try:
+            configure(logger=logger, level="WARNING")
+            with logmap("filtered") as lm:
+                lm.debug("should be filtered")
+                lm.warning("should appear")
+            handler.flush()
+            messages = [r.getMessage() for r in handler.buffer]
+            assert not any("should be filtered" in m for m in messages)
+            assert any("should appear" in m for m in messages)
+        finally:
+            configure(logger=None, level="DEBUG")
+            logger.removeHandler(handler)
+
+    def test_clear_logger_resumes_sink_output(self, captured_sink):
+        logger = logging.getLogger("logmap.test.clear")
+        configure(logger=logger)
+        configure(logger=None)
+        with logmap("back to sink") as lm:
+            lm.log("visible")
+        assert "visible" in captured_sink.getvalue()
+
+
+class TestLoud:
+    def test_loud_context_enables_logging(self):
+        logmap.disable()
+        try:
+            with logmap.loud():
+                assert logmap.is_quiet is False
+            assert logmap.is_quiet is True
+        finally:
+            logmap.enable()
+
+    def test_loud_restores_on_exception(self):
+        logmap.disable()
+        try:
+            with pytest.raises(ValueError):
+                with logmap.loud():
+                    raise ValueError("x")
+            assert logmap.is_quiet is True
+        finally:
+            logmap.enable()
+
+
+class TestVerbosity:
+    def test_verbosity_1_enables_logging(self):
+        logmap.disable()
+        try:
+            with logmap.verbosity(level=1):
+                assert logmap.is_quiet is False
+            assert logmap.is_quiet is True
+        finally:
+            logmap.enable()
+
+    def test_verbosity_0_disables_logging(self):
+        with logmap.verbosity(level=0):
+            assert logmap.is_quiet is True
+        assert logmap.is_quiet is False
+
+
+class TestColorizedOutput:
+    def test_colorized_branch(self):
+        import importlib
+        _mod = importlib.import_module("logmap.logmap")
+        buf = io.StringIO()
+        buf.isatty = lambda: True
+        old_colorize = _mod._colorize
+        configure(sink=buf)
+        _mod._colorize = True
+        try:
+            with logmap("color-test") as lm:
+                lm.log("colored")
+            output = buf.getvalue()
+            assert "\033[" in output
+            assert "colored" in output
+        finally:
+            _mod._colorize = old_colorize
+            configure(sink=sys.stderr)
+
+
+class TestConfigureFileSwitch:
+    def test_reconfigure_closes_previous_file(self, tmp_path, captured_sink):
+        file1 = tmp_path / "a.log"
+        file2 = tmp_path / "b.log"
+        configure(sink=str(file1))
+        with logmap("first"):
+            pass
+        configure(sink=str(file2))
+        with logmap("second"):
+            pass
+        configure(sink=captured_sink)
+        assert "first" in file1.read_text()
+        assert "second" in file2.read_text()
+
+
+class TestPadmin:
+    def test_pads_short_string(self):
+        from logmap.logmap import padmin
+        result = padmin("hi", 10)
+        assert len(result) == 10
+        assert result.startswith("hi")
+
+    def test_truncates_long_string(self):
+        from logmap.logmap import padmin
+        result = padmin("abcdefghij", 5)
+        assert result == "abcde"
+
+    def test_exact_length_unchanged(self):
+        from logmap.logmap import padmin
+        result = padmin("abcde", 5)
+        assert result == "abcde"
+
+
+class TestPmapEdgeCases:
+    def test_num_proc_none_defaults_to_one(self):
+        out = pmap(_square, [2, 3], num_proc=None, progress=False)
+        assert sorted(out) == [4, 9]
+
+    def test_num_proc_zero_defaults_to_one(self):
+        out = pmap(_square, [2, 3], num_proc=0, progress=False)
+        assert sorted(out) == [4, 9]
+
+    def test_num_proc_exceeds_cpu_count(self):
+        import multiprocessing as mp
+        huge = mp.cpu_count() + 100
+        out = pmap(_square, [2, 3], num_proc=huge, progress=False)
+        assert sorted(out) == [4, 9]
+
+
+class TestLevelMethods:
+    def test_trace_writes_at_trace_level(self, captured_sink):
+        configure(sink=captured_sink, level="TRACE")
+        try:
+            with logmap("t") as lm:
+                lm.trace("trace msg")
+            assert "trace msg" in captured_sink.getvalue()
+        finally:
+            configure(level="DEBUG")
+
+    def test_error_writes_at_error_level(self, captured_sink):
+        with logmap("t") as lm:
+            lm.error("error msg")
+        assert "error msg" in captured_sink.getvalue()
+
+
+class TestImapEdgeCases:
+    def test_imap_with_lim(self):
+        with logmap("m") as lm:
+            out = lm.map(_square, [1, 2, 3, 4, 5], lim=3, num_proc=1, progress=False)
+        assert len(out) == 3
+
+    def test_imap_default_num_proc(self):
+        with logmap("m") as lm:
+            out = lm.map(_square, [1, 2, 3], progress=False)
+        assert sorted(out) == [1, 4, 9]
+
+
+class TestLapTdesc:
+    def test_lap_tdesc_is_string(self):
+        with logmap("t") as lm:
+            lm.lap()
+            time.sleep(0.01)
+            desc = lm.lap_tdesc
+            assert isinstance(desc, str)
+            assert len(desc) > 0
+
+
+class TestCallable:
+    def test_call_delegates_to_iter_progress(self, captured_sink):
+        with logmap("t") as lm:
+            items = list(lm([1, 2, 3], progress=False))
+        assert items == [1, 2, 3]
+
+
+class TestSafetyProperty:
+    def test_safety_swallows_exception(self):
+        with logmap("t") as lm:
+            with lm.safety:
+                raise ValueError("caught")
+
+    def test_safety_lets_non_exception_through(self):
+        with pytest.raises(KeyboardInterrupt):
+            with logmap("t") as lm:
+                with lm.safety:
+                    raise KeyboardInterrupt
+
+
+class TestStructuredOutput:
+    def test_structured_emits_valid_json(self, captured_sink):
+        configure(sink=captured_sink, structured=True)
+        try:
+            with logmap("json-test") as lm:
+                lm.info("structured message")
+            lines = [l for l in captured_sink.getvalue().splitlines() if l.strip()]
+            for line in lines:
+                record = json.loads(line)
+                assert "ts" in record
+                assert "level" in record
+                assert "msg" in record
+        finally:
+            configure(structured=False)
+
+    def test_structured_includes_depth_and_task(self, captured_sink):
+        configure(sink=captured_sink, structured=True)
+        try:
+            with logmap("my-task") as lm:
+                lm.info("hello")
+            lines = captured_sink.getvalue().splitlines()
+            info_line = next(l for l in lines if "hello" in l)
+            record = json.loads(info_line)
+            assert record["task"] == "my-task"
+            assert "depth" in record
+        finally:
+            configure(structured=False)
+
+    def test_structured_msg_is_clean(self, captured_sink):
+        """In structured mode, msg should be the clean message (no indentation prefix)."""
+        configure(sink=captured_sink, structured=True)
+        try:
+            with logmap("task") as lm:
+                lm.info("clean text")
+            lines = captured_sink.getvalue().splitlines()
+            info_line = next(l for l in lines if "clean text" in l)
+            record = json.loads(info_line)
+            assert record["msg"] == "clean text"
+        finally:
+            configure(structured=False)
+
+    def test_structured_off_by_default(self, captured_sink):
+        with logmap("plain") as lm:
+            lm.log("not json")
+        output = captured_sink.getvalue()
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(output.splitlines()[0])

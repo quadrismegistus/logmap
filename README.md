@@ -128,6 +128,35 @@ configure(level="INFO")             # drop DEBUG messages
 
 Colors auto-disable when the sink isn't a TTY (files, StringIO, etc.).
 
+### Stdlib logging integration
+
+Route all logmap output through a standard library `logging.Logger`:
+
+```python
+import logging
+from logmap import configure
+
+configure(logger=logging.getLogger("myapp"))
+```
+
+This lets you attach any stdlib handler (file, syslog, etc.) and have logmap participate in your application's logging hierarchy. Level integers match stdlib conventions, so filtering works as expected. Pass `logger=None` to switch back to direct sink output.
+
+### Structured (JSON) output
+
+For log aggregation or machine parsing, enable JSON-lines mode:
+
+```python
+configure(structured=True)
+```
+
+Each line becomes a JSON object:
+
+```json
+{"ts": "2026-04-19T15:12:55.349000", "level": "INFO", "msg": "doing work", "depth": 1, "task": "outer"}
+```
+
+The `msg` field contains the clean message (no indentation prefix), while `depth` and `task` give you the hierarchical context as structured data.
+
 ### Silencing
 
 ```python
@@ -140,3 +169,11 @@ logmap.enable()                     # back on
 ```
 
 `with logmap('task', announce=False):` suppresses just the open/close lines while keeping `lm.log()` active.
+
+### Thread safety
+
+Nesting depth and quiet state are thread-local — multiple threads can use `logmap` concurrently without interleaving indentation or silencing each other. Output writes are serialized with a lock to prevent garbled lines.
+
+### Multiprocessing on macOS
+
+On macOS, `logmap` defaults to the `forkserver` multiprocessing context instead of `fork` (which Python 3.12+ deprecates due to deadlock risk with threads). You can still pass `context="spawn"` or `context="fork"` explicitly to `lm.map()` / `pmap()` if needed.
