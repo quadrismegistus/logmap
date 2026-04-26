@@ -49,6 +49,10 @@ LEVELS = {
 # ANSI color codes used in output
 _RESET = "\033[0m"
 _CYAN = "\033[0;36m"
+TOP_CHAR = "⎾"
+BOTTOM_CHAR = "⎿"
+VERTICAL_CHAR = " "
+
 LEVEL_COLORS = {
     "TRACE":    "\033[0;36m",
     "DEBUG":    "\033[1;34m",
@@ -429,9 +433,9 @@ class logmap(metaclass=_LogmapMeta):
         self.level = level.upper()
         self.task_name = name
         self.min_seconds_logworthy = min_seconds_logworthy
-        self.vertical_char = "￨"
-        self.top_char = "⎾"
-        self.bottom_char = "⎿"
+        self.vertical_char = VERTICAL_CHAR
+        self.top_char = TOP_CHAR
+        self.bottom_char = BOTTOM_CHAR
         self.last_lap = None
         self.pbar = None
         self.num_proc = None

@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from logmap import configure, logmap, pmap, pmap_iter, pmap_run
+from logmap import VERTICAL_CHAR, configure, logmap, pmap, pmap_iter, pmap_run
 
 
 # Module-level functions so they're picklable by multiprocess workers.
@@ -86,13 +86,14 @@ class TestNesting:
                 with logmap("inner") as lm3:
                     lm3.log("c")
         lines = [l for l in captured_sink.getvalue().splitlines() if l.strip()]
-        # log() uses inner_pref = vertical-char * num, so depth N -> N verticals
-        a_line = next(l for l in lines if l.lstrip("￨ ").startswith("a"))
-        b_line = next(l for l in lines if l.lstrip("￨ ").startswith("b"))
-        c_line = next(l for l in lines if l.lstrip("￨ ").startswith("c"))
-        assert a_line.count("￨") == 1
-        assert b_line.count("￨") == 2
-        assert c_line.count("￨") == 3
+        # log() uses inner_pref = (vertical_char + " ") * num, so depth N -> 2N leading chars
+        pref_unit = VERTICAL_CHAR + " "
+        a_line = next(l for l in lines if l.lstrip(VERTICAL_CHAR + " ").startswith("a"))
+        b_line = next(l for l in lines if l.lstrip(VERTICAL_CHAR + " ").startswith("b"))
+        c_line = next(l for l in lines if l.lstrip(VERTICAL_CHAR + " ").startswith("c"))
+        assert a_line.startswith(pref_unit * 1)
+        assert b_line.startswith(pref_unit * 2)
+        assert c_line.startswith(pref_unit * 3)
 
 
 class TestQuiet:
