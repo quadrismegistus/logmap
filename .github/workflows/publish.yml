@@ -84,4 +84,6 @@ jobs:
       - name: Upload signatures to release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.ref_name }}" dist/** --repo "${{ github.repository }}"
+        # --clobber: the sigstore action auto-attaches signed artifacts on
+        # release events, so these asset names already exist on the release.
+        run: gh release upload "${{ github.ref_name }}" dist/** --clobber --repo "${{ github.repository }}"
