@@ -33,10 +33,6 @@ def _add(x, y):
     return x + y
 
 
-def _raise(x):
-    raise RuntimeError("boom")
-
-
 class TestContextManager:
     def test_started_and_ended_set(self):
         with logmap("task") as lm:

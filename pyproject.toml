@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "logmap"
-version = "0.3.2"
+version = "0.4.0"
 description = "A hierarchical, context-manager logger utility with multiprocess mapping capabilities"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -17,9 +17,12 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 dependencies = [
     "humanfriendly",
@@ -32,11 +35,14 @@ Homepage = "https://github.com/quadrismegistus/logmap"
 
 [project.optional-dependencies]
 dev = ["build", "twine", "wheel"]
-test = ["pytest>=7.2"]
+test = ["pytest>=7.2", "pytest-cov"]
 all = ["logmap[dev]", "logmap[test]"]
 
 [tool.setuptools.packages.find]
 exclude = ["tests", "tests.*"]
+
+[tool.setuptools.package-data]
+logmap = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -2,9 +2,12 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
 from .logmap import (
     BOTTOM_CHAR,
+    DEFAULT_FORMAT,
+    LEVELS,
     TOP_CHAR,
     VERTICAL_CHAR,
     configure,
+    get_config,
     logmap,
     pmap,
     pmap_iter,
@@ -18,9 +21,12 @@ except PackageNotFoundError:  # running from source tree, not installed
 
 __all__ = [
     "BOTTOM_CHAR",
+    "DEFAULT_FORMAT",
+    "LEVELS",
     "TOP_CHAR",
     "VERTICAL_CHAR",
     "configure",
+    "get_config",
     "logmap",
     "pmap",
     "pmap_iter",
